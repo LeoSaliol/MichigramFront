@@ -13,7 +13,7 @@ export default function Login() {
     const navigate = useNavigate();
     const { isDark } = useThemeStore();
     const { login } = useAuthStore();
-    const apiUrl = import.meta.env.PUBLIC_API_URL;
+    const apiUrl = import.meta.env.FRONTEND_URL;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
