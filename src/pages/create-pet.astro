@@ -1,0 +1,9 @@
+---
+import Layout from '../layouts/Layout.astro';
+import App from '../components/App';
+export const prerender = false;
+---
+
+<Layout title="Crear Mascota">
+  <App client:only="react" />
+</Layout>

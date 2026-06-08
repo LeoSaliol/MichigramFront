@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primaryBlack: #0b090a;
+  --color-primaryWhite: #fff9fa;
+  --color-likeColor: #ed6b86;
+  --color-pinkNotify: #f54669;
+  --color-formColorLight: #fab3a9;
+  --color-formColorDark: #ed6b90;
+  --color-redPink: #da1b41;
+  --color-bgBlack: #1b1a1a;
+  --color-bgWhite: #f8f8f8;
+
+  --font-family-sans: 'Bricolage Grotesque', system-ui, sans-serif;
+}
+
+.dark {
+  --color-primaryBlack: #e5e5e5;
+  --color-primaryWhite: #1e1e2e;
+  --color-likeColor: #ed6b86;
+  --color-pinkNotify: #f54669;
+  --color-formColorLight: #3a2a3a;
+  --color-formColorDark: #ed6b90;
+  --color-redPink: #da1b41;
+  --color-bgBlack: #e5e5e5;
+  --color-bgWhite: #121212;
+}
+
+body {
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  background-color: var(--color-bgWhite);
+  color: var(--color-primaryBlack);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bgWhite);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-formColorLight);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-formColorDark);
+}

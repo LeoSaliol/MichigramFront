@@ -1,0 +1,9 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import AuthCallback from '../../components/AuthCallback';
+export const prerender = false;
+---
+
+<Layout title="Auth Callback">
+  <AuthCallback client:only="react" />
+</Layout>
