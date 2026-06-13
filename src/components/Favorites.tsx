@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Bookmark, Heart, MessageCircle, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import Navbar from './Navbar';
 import PostModal from './PostModal';
+import { SkeletonPostGrid } from './Skeletons';
 
 interface PostData {
   id: number;
@@ -48,11 +50,16 @@ export default function Favorites() {
   };
 
   const handleRemoveFavorite = async (postId: number) => {
+    const removedPost = posts.find(p => p.id === postId);
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+
     try {
       await api.post(`/favorites/toggle/${postId}`, { petId: currentPet?.id });
-      setPosts((prev) => prev.filter((p) => p.id !== postId));
       toast.success('Eliminado de favoritos');
     } catch {
+      if (removedPost) {
+        setPosts((prev) => [...prev, removedPost]);
+      }
       toast.error('Error al eliminar de favoritos');
     }
   };
@@ -67,9 +74,7 @@ export default function Favorites() {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-formColorDark" />
-          </div>
+          <SkeletonPostGrid count={9} />
         ) : posts.length === 0 ? (
           <div className="bg-primaryWhite rounded-2xl shadow-lg p-8 text-center border border-formColorLight/20">
             <div className="w-16 h-16 bg-gradient-to-br from-formColorLight/20 to-formColorDark/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -81,9 +86,18 @@ export default function Favorites() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-1 md:gap-2">
+          <motion.div layout className="grid grid-cols-3 gap-1 md:gap-2">
+            <AnimatePresence>
             {posts.map((post) => (
-              <div key={post.id} className="relative aspect-square group overflow-hidden bg-formColorLight/20 rounded-sm cursor-pointer">
+              <motion.div
+                key={post.id}
+                layout
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ duration: 0.2 }}
+                className="relative aspect-square group overflow-hidden bg-formColorLight/20 rounded-sm cursor-pointer"
+              >
                 <button
                   onClick={() => setSelectedPost(post)}
                   className="w-full h-full"
@@ -110,9 +124,10 @@ export default function Favorites() {
                 >
                   <Bookmark className="w-4 h-4 fill-white" />
                 </button>
-              </div>
+              </motion.div>
             ))}
-          </div>
+            </AnimatePresence>
+          </motion.div>
         )}
       </div>
 

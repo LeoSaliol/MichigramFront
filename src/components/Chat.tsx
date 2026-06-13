@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import Navbar from './Navbar';
 import { connectSocket, disconnectSocket } from '../lib/socket';
+import { SkeletonConversationList } from './Skeletons';
 
 interface ParticipantPet {
   id: number;
@@ -193,11 +194,11 @@ export default function Chat() {
   };
 
   return (
-    <div className="min-h-screen bg-bgWhite">
+    <div className="h-screen bg-bgWhite overflow-hidden flex flex-col">
       <Navbar />
 
-      <div className="max-w-2xl mx-auto px-4 py-8">
-          <div className="bg-primaryWhite rounded-2xl shadow-lg overflow-hidden border border-formColorLight/20 min-h-[600px] max-h-[calc(100vh-8rem)] flex flex-col">
+      <div className="max-w-2xl mx-auto px-4 py-8 flex-1 min-h-0 w-full">
+          <div className="bg-primaryWhite rounded-2xl shadow-lg overflow-hidden border border-formColorLight/20 h-full flex flex-col">
           <div className="p-4 border-b border-formColorLight/20 bg-gradient-to-r from-formColorLight/10 to-formColorDark/10">
             <h1 className="text-xl font-bold text-primaryBlack flex items-center gap-2">
               <MessageCircle className="w-6 h-6 text-redPink" />
@@ -347,9 +348,7 @@ export default function Chat() {
           ) : (
             <div className="flex-1 overflow-y-auto min-h-0">
               {isLoading ? (
-                <div className="flex items-center justify-center py-20">
-                  <div className="w-12 h-12 border-4 border-formColorLight/30 border-t-redPink rounded-full animate-spin" />
-                </div>
+                <SkeletonConversationList count={6} />
               ) : conversations.length === 0 ? (
                 <div className="p-8 text-center">
                   <div className="w-20 h-20 bg-gradient-to-br from-formColorLight/20 to-formColorDark/20 rounded-full flex items-center justify-center mx-auto mb-4">

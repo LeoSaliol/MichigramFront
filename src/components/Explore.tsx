@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Heart, MessageCircle, Search, Users } from 'lucide-react';
+import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import Navbar from './Navbar';
 import PostModal from './PostModal';
+import { SkeletonPostGrid } from './Skeletons';
 
 interface Post {
   id: number;
@@ -144,9 +146,7 @@ export default function Explore() {
         ) : (
           <>
             {isLoading ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="w-12 h-12 border-4 border-formColorLight/30 border-t-redPink rounded-full animate-spin" />
-              </div>
+              <SkeletonPostGrid count={12} />
             ) : posts.length === 0 ? (
               <div className="bg-primaryWhite rounded-2xl shadow-lg p-8 text-center border border-formColorLight/20">
                 <div className="w-16 h-16 bg-gradient-to-br from-formColorLight/20 to-formColorDark/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -155,10 +155,15 @@ export default function Explore() {
                 <p className="text-primaryBlack/60">No hay publicaciones todavía</p>
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-1 md:gap-2">
+              <motion.div layout className="grid grid-cols-3 gap-1 md:gap-2">
                 {posts.map((post) => (
-                  <button
+                  <motion.button
                     key={post.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.2 }}
                     onClick={() => setSelectedPost(post)}
                     className="relative aspect-square group overflow-hidden bg-formColorLight/20 cursor-pointer"
                   >
@@ -177,9 +182,9 @@ export default function Explore() {
                         <span className="font-semibold">{post._count.comments}</span>
                       </div>
                     </div>
-                  </button>
+                  </motion.button>
                 ))}
-              </div>
+              </motion.div>
             )}
           </>
         )}

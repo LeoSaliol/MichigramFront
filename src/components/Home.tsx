@@ -1,14 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-    Heart,
     MessageCircle,
-    Bookmark,
     MoreHorizontal,
-    Loader2,
     Pencil,
     Trash2,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
@@ -17,12 +15,15 @@ import ImageCropper from './ImageCropper';
 import ConfirmModal from './ConfirmModal';
 import PostModal from './PostModal';
 import LocationPicker from './LocationPicker';
+import { SkeletonFeed } from './Skeletons';
+import { OptimisticHeart } from './ui/OptimisticHeart';
+import { PendingButton } from './ui/PendingButton';
+import { OptimisticPostCard } from './ui/OptimisticPostCard';
 
 export default function Home() {
     const navigate = useNavigate();
     const [posts, setPosts] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [isCreatingPost, setIsCreatingPost] = useState(false);
     const { currentPet, fetchMyPets, pets, hasPet, isAuthenticated } = useAuthStore();
     const [showCreatePost, setShowCreatePost] = useState(false);
     const [newPostImage, setNewPostImage] = useState<File | null>(null);
@@ -41,6 +42,11 @@ export default function Home() {
     const [reportPostId, setReportPostId] = useState<number | null>(null);
     const [selectedPost, setSelectedPost] = useState<any>(null);
     const [favoritedPosts, setFavoritedPosts] = useState<Set<number>>(new Set());
+    const [pendingLikes, setPendingLikes] = useState<Set<number>>(new Set());
+    const [pendingFavorites, setPendingFavorites] = useState<Set<number>>(new Set());
+    const [optimisticPost, setOptimisticPost] = useState<any | null>(null);
+    const postsRef = useRef(posts);
+    postsRef.current = posts;
 
     useEffect(() => {
         fetchMyPets();
@@ -95,29 +101,57 @@ export default function Home() {
             navigate('/login');
             return;
         }
+
+        if (pendingLikes.has(postId)) return;
+
+        const post = postsRef.current.find(p => p.id === postId);
+        if (!post) return;
+
+        const wasLiked = post.likedByUser;
+        const prevLikes = post.likesCount ?? post._count?.likes ?? 0;
+
+        setPendingLikes(prev => new Set(prev).add(postId));
+        setPosts(prev =>
+            prev.map(p =>
+                p.id === postId
+                    ? {
+                          ...p,
+                          likedByUser: !p.likedByUser,
+                          likesCount: wasLiked ? prevLikes - 1 : prevLikes + 1,
+                          _count: {
+                              ...p._count,
+                              likes: wasLiked ? p._count.likes - 1 : p._count.likes + 1,
+                          },
+                      }
+                    : p,
+            ),
+        );
+
         try {
             await api.post(`/likes/toggle/${postId}`);
-            setPosts(
-                posts.map((post) =>
-                    post.id === postId
+        } catch {
+            setPosts(prev =>
+                prev.map(p =>
+                    p.id === postId
                         ? {
-                              ...post,
-                              likedByUser: !post.likedByUser,
-                              likesCount: post.likedByUser
-                                  ? post.likesCount - 1
-                                  : post.likesCount + 1,
+                              ...p,
+                              likedByUser: wasLiked,
+                              likesCount: prevLikes,
                               _count: {
-                                  ...post._count,
-                                  likes: post.likedByUser
-                                      ? post._count.likes - 1
-                                      : post._count.likes + 1,
+                                  ...p._count,
+                                  likes: prevLikes,
                               },
                           }
-                        : post,
+                        : p,
                 ),
             );
-        } catch (error: any) {
             toast.error('Error al dar like');
+        } finally {
+            setPendingLikes(prev => {
+                const next = new Set(prev);
+                next.delete(postId);
+                return next;
+            });
         }
     };
 
@@ -168,19 +202,33 @@ export default function Home() {
             return;
         }
 
+        const originalContent = postsRef.current.find(p => p.id === postId)?.content || '';
+
+        setPosts(prev =>
+            prev.map(p =>
+                p.id === postId ? { ...p, content: editContent, _pending: true } : p,
+            ),
+        );
         setIsEditing(true);
+
         try {
             await api.put(`/posts/${postId}`, { content: editContent });
             toast.success('Publicación actualizada');
-            setPosts(
-                posts.map((p) =>
-                    p.id === postId ? { ...p, content: editContent } : p,
-                ),
-            );
-            setIsEditing(false);
             setEditingPostId(null);
             setEditContent('');
+            setPosts(prev =>
+                prev.map(p =>
+                    p.id === postId ? { ...p, _pending: false } : p,
+                ),
+            );
         } catch (error: any) {
+            setPosts(prev =>
+                prev.map(p =>
+                    p.id === postId
+                        ? { ...p, content: originalContent, _pending: false }
+                        : p,
+                ),
+            );
             toast.error(error.message || 'Error al actualizar');
         } finally {
             setIsEditing(false);
@@ -202,13 +250,19 @@ export default function Home() {
     const confirmDeletePost = async () => {
         if (!deletePostId) return;
 
+        const deletedPostRef = postsRef.current.find(p => p.id === deletePostId);
+
+        setPosts(prev => prev.filter((p) => p.id !== deletePostId));
+        setShowDeleteModal(false);
+        setDeletePostId(null);
+
         try {
             await api.delete(`/posts/${deletePostId}`);
             toast.success('Publicación eliminada');
-            setPosts(posts.filter((p) => p.id !== deletePostId));
-            setShowDeleteModal(false);
-            setDeletePostId(null);
         } catch (error: any) {
+            if (deletedPostRef) {
+                setPosts(prev => [...prev, deletedPostRef]);
+            }
             toast.error(error.message || 'Error al eliminar');
         }
     };
@@ -248,19 +302,41 @@ export default function Home() {
             navigate('/login');
             return;
         }
+
+        if (pendingFavorites.has(postId)) return;
+
+        const wasFavorited = favoritedPosts.has(postId);
+
+        setPendingFavorites(prev => new Set(prev).add(postId));
+        setFavoritedPosts((prev) => {
+            const next = new Set(prev);
+            if (next.has(postId)) {
+                next.delete(postId);
+            } else {
+                next.add(postId);
+            }
+            return next;
+        });
+
         try {
             await api.post(`/favorites/toggle/${postId}`, { petId: currentPet?.id });
+        } catch {
             setFavoritedPosts((prev) => {
                 const next = new Set(prev);
-                if (next.has(postId)) {
-                    next.delete(postId);
-                } else {
+                if (wasFavorited) {
                     next.add(postId);
+                } else {
+                    next.delete(postId);
                 }
                 return next;
             });
-        } catch {
             toast.error('Error al guardar favorito');
+        } finally {
+            setPendingFavorites(prev => {
+                const next = new Set(prev);
+                next.delete(postId);
+                return next;
+            });
         }
     };
 
@@ -290,10 +366,36 @@ export default function Home() {
             return;
         }
 
-        setIsCreatingPost(true);
+        const optimisticId = -Date.now();
+        const optimisticPostData = {
+            id: optimisticId,
+            image: imagePreview || '',
+            content: newPostDescription || null,
+            location: newPostLocation || null,
+            createdAt: new Date().toISOString(),
+            likedByUser: false,
+            pet: {
+                id: currentPet.id,
+                name: currentPet.name,
+                image: currentPet.image || null,
+            },
+            _count: { likes: 0, comments: 0 },
+            _optimistic: true,
+        };
+
+        setOptimisticPost(optimisticPostData);
+        setShowCreatePost(false);
+
+        const imageData = imagePreview;
+        setNewPostImage(null);
+        setNewPostDescription('');
+        setNewPostLocation('');
+        setImagePreview(null);
+
         try {
             const formData = new FormData();
-            formData.append('image', newPostImage);
+            const fileInput = newPostImage;
+            formData.append('image', fileInput);
             formData.append('petId', currentPet.id.toString());
             if (newPostDescription) {
                 formData.append('content', newPostDescription);
@@ -302,17 +404,13 @@ export default function Home() {
                 formData.append('location', newPostLocation);
             }
 
-            await api.postFormData('/posts', formData);
+            const response = await api.postFormData<{ data: any }>('/posts', formData);
             toast.success('¡Publicación creada!');
-            setShowCreatePost(false);
-            setNewPostImage(null);
-            setNewPostDescription('');
-            setNewPostLocation('');
+            setOptimisticPost(null);
             fetchPosts();
         } catch (error: any) {
+            setOptimisticPost(null);
             toast.error(error.message || 'Error al crear la publicación');
-        } finally {
-            setIsCreatingPost(false);
         }
     };
 
@@ -446,20 +544,15 @@ export default function Home() {
                                 />
                             </div>
 
-                            <button
+                            <PendingButton
                                 onClick={handleCreatePost}
-                                disabled={isCreatingPost}
-                                className="w-full py-3 bg-linear-to-r from-formColorLight to-formColorDark text-white font-semibold rounded-xl hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-formColor/30"
+                                pending={false}
+                                fullWidth
+                                variant="primary"
+                                size="lg"
                             >
-                                {isCreatingPost ? (
-                                    <>
-                                        <Loader2 className="w-5 h-5 animate-spin" />
-                                        Publicando...
-                                    </>
-                                ) : (
-                                    'Publicar'
-                                )}
-                            </button>
+                                Publicar
+                            </PendingButton>
                         </div>
                     </div>
                 </div>
@@ -489,29 +582,21 @@ export default function Home() {
                                 className="w-full border border-formColorLight/20 rounded-xl p-4 resize-none h-32 bg-primaryWhite focus:border-formColorDark focus:ring-2 focus:ring-formColorDark/20 outline-none transition-all"
                             />
                         </div>
-                        <button
+                        <PendingButton
                             onClick={() => handleSaveEdit(editingPostId)}
-                            disabled={isEditing}
-                            className="w-full mt-4 py-3 bg-linear-to-r from-formColorLight to-formColorDark text-white font-semibold rounded-xl hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-formColor/30"
+                            pending={isEditing}
+                            fullWidth
+                            size="lg"
                         >
-                            {isEditing ? (
-                                <>
-                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                    Guardando...
-                                </>
-                            ) : (
-                                'Guardar Cambios'
-                            )}
-                        </button>
+                            Guardar Cambios
+                        </PendingButton>
                     </div>
                 </div>
             )}
 
             <div className="max-w-5xl mx-auto px-4 py-8">
                 {isLoading ? (
-                    <div className="flex items-center justify-center py-20">
-                        <div className="w-12 h-12 border-4 border-formColorLight/30 border-t-formColorDark rounded-full animate-spin" />
-                    </div>
+                    <SkeletonFeed count={3} />
                 ) : posts.length === 0 ? (
                     <div className="bg-primaryWhite rounded-2xl shadow-lg p-8 text-center border border-formColorLight/20">
                         <div className="w-16 h-16 bg-linear-to-br from-formColorLight/20 to-formColorDark/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -526,11 +611,32 @@ export default function Home() {
                     </div>
                 ) : (
                     <div className="space-y-6">
-                        {posts.map((post) => (
-                            <div
-                                key={post.id}
-                                className="bg-primaryWhite dark:bg-transparent rounded-2xl shadow-lg dark:shadow-none overflow-hidden border border-formColorLight/20 dark:border-0"
-                            >
+                        <AnimatePresence>
+                            {optimisticPost && (
+                                <motion.div
+                                    key="optimistic-post"
+                                    initial={{ opacity: 0, y: -20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                                    transition={{ duration: 0.3 }}
+                                >
+                                    <OptimisticPostCard
+                                        name={currentPet?.name || ''}
+                                        image={currentPet?.image}
+                                        description={newPostDescription}
+                                    />
+                                </motion.div>
+                            )}
+                            {posts.map((post) => (
+                                <motion.div
+                                    key={post.id}
+                                    layout
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, x: -100, scale: 0.95 }}
+                                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                                    className="bg-primaryWhite dark:bg-transparent rounded-2xl shadow-lg dark:shadow-none overflow-hidden border border-formColorLight/20 dark:border-0"
+                                >
                                 <div className="flex items-center justify-between p-4 border-b border-formColorLight/10 dark:border-b-0">
                                     <Link
                                         to={`/pet/${post.pet.id}`}
@@ -636,37 +742,28 @@ export default function Home() {
 
                                 <div className="p-4">
                                     <div className="flex items-center gap-4 mb-4">
-                                        <button
+                                        <OptimisticHeart
+                                            liked={post.likedByUser}
+                                            count={post._count?.likes || 0}
+                                            pending={pendingLikes.has(post.id)}
                                             onClick={() => handleLike(post.id)}
-                                            className={`flex items-center gap-2 transition-all ${
-                                                post.likedByUser
-                                                    ? 'text-likeColor'
-                                                    : 'text-primaryBlack/60 hover:text-likeColor'
-                                            }`}
-                                        >
-                                            <Heart
-                                                className={`w-7 h-7 ${post.likedByUser ? 'fill-current' : ''} transition-transform hover:scale-110`}
-                                            />
-                                            <span className="text-sm font-medium">
-                                                {post._count?.likes || 0}
-                                            </span>
-                                        </button>
+                                            variant="like"
+                                            className="text-sm"
+                                        />
                                         <button onClick={() => setSelectedPost(post)} className="flex items-center gap-2 text-primaryBlack/60 hover:text-formColorDark transition-colors">
                                             <MessageCircle className="w-7 h-7" />
                                             <span className="text-sm font-medium">
                                                 {post._count?.comments || 0}
                                             </span>
                                         </button>
-                                        <button
+                                        <OptimisticHeart
+                                            liked={favoritedPosts.has(post.id)}
+                                            count={0}
+                                            pending={pendingFavorites.has(post.id)}
                                             onClick={() => handleToggleFavorite(post.id)}
-                                            className={`ml-auto transition-colors ${
-                                                favoritedPosts.has(post.id)
-                                                    ? 'text-likeColor'
-                                                    : 'text-primaryBlack/60 hover:text-likeColor'
-                                            }`}
-                                        >
-                                            <Bookmark className={`w-7 h-7 ${favoritedPosts.has(post.id) ? 'fill-current' : ''}`} />
-                                        </button>
+                                            variant="favorite"
+                                            className="ml-auto"
+                                        />
                                     </div>
 
                                     {post.content && (
@@ -687,8 +784,9 @@ export default function Home() {
                                         </button>
                                     )}
                                 </div>
-                            </div>
-                        ))}
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
                     </div>
                 )}
             </div>

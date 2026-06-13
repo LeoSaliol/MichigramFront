@@ -171,9 +171,16 @@ function AppContent() {
         />
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
-      <Footer />
+      <FooterWithRoute />
     </>
   );
+}
+
+function FooterWithRoute() {
+  const location = useLocation();
+  const hideOnRoutes = ['/chat'];
+  if (hideOnRoutes.includes(location.pathname)) return null;
+  return <Footer />;
 }
 
 export default function App() {
@@ -183,7 +190,7 @@ export default function App() {
         <AppContent />
       </BrowserRouter>
       <Toaster
-        position="top-center"
+        position="top-left"
         toastOptions={{
           style: {
             background: 'var(--color-primaryWhite)',

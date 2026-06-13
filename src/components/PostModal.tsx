@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Heart, MessageCircle, Bookmark, X, Loader2, Send, Pencil, Trash2, Check, X as XIcon, MoreHorizontal } from 'lucide-react';
+import { MessageCircle, X, Pencil, Trash2, Check, X as XIcon, MoreHorizontal } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import ConfirmModal from './ConfirmModal';
+import { SkeletonCommentsList } from './Skeletons';
+import { OptimisticHeart } from './ui/OptimisticHeart';
+import { CommentInput } from './ui/CommentInput';
+import { PendingButton } from './ui/PendingButton';
 
 interface PostData {
   id: number;
@@ -54,15 +59,26 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [commentText, setCommentText] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
+  const [likePending, setLikePending] = useState(false);
+  const [favPending, setFavPending] = useState(false);
   const { currentPet, pets, isAuthenticated } = useAuthStore();
   const commentsEndRef = useRef<HTMLDivElement>(null);
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editingCommentText, setEditingCommentText] = useState('');
+  const [editingPending, setEditingPending] = useState<number | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteCommentId, setDeleteCommentId] = useState<number | null>(null);
   const [showDeletePostModal, setShowDeletePostModal] = useState(false);
+  const [deletePostPending, setDeletePostPending] = useState(false);
   const isOwnPost = pets.some((p) => p.id === post.pet.id);
+
+  const likedRef = useRef(liked);
+  likedRef.current = liked;
+  const likesCountRef = useRef(likesCount);
+  likesCountRef.current = likesCount;
+  const favoritedRef = useRef(favorited);
+  favoritedRef.current = favorited;
 
   useEffect(() => {
     fetchComments();
@@ -104,11 +120,19 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
       navigate('/login');
       return;
     }
+    if (favPending) return;
+
+    const wasFav = favoritedRef.current;
+    setFavPending(true);
+    setFavorited(!wasFav);
+
     try {
       await api.post(`/favorites/toggle/${post.id}`, { petId: currentPet?.id });
-      setFavorited(!favorited);
     } catch {
+      setFavorited(wasFav);
       toast.error('Error al guardar favorito');
+    } finally {
+      setFavPending(false);
     }
   };
 
@@ -118,15 +142,24 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
       navigate('/login');
       return;
     }
+    if (likePending) return;
+
+    const wasLiked = likedRef.current;
+    const prevCount = likesCountRef.current;
+    setLikePending(true);
+    setLiked(!wasLiked);
+    setLikesCount(wasLiked ? prevCount - 1 : prevCount + 1);
+    onLikeUpdate?.(post.id, !wasLiked, wasLiked ? prevCount - 1 : prevCount + 1);
+
     try {
       await api.post(`/likes/toggle/${post.id}`);
-      const newLiked = !liked;
-      const newCount = liked ? likesCount - 1 : likesCount + 1;
-      setLiked(newLiked);
-      setLikesCount(newCount);
-      onLikeUpdate?.(post.id, newLiked, newCount);
     } catch {
+      setLiked(wasLiked);
+      setLikesCount(prevCount);
+      onLikeUpdate?.(post.id, wasLiked, prevCount);
       toast.error('Error al dar like');
+    } finally {
+      setLikePending(false);
     }
   };
 
@@ -138,43 +171,56 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
     }
     const text = commentText.trim();
     if (!text) return;
+    if (sendingComment) return;
+
+    const tempComment: CommentData = {
+      id: -Date.now(),
+      content: text,
+      createdAt: new Date().toISOString(),
+      pet: currentPet
+        ? { id: currentPet.id, name: currentPet.name, image: currentPet.image || null }
+        : { id: 0, name: '', image: null },
+    };
+
+    setSendingComment(true);
+    setComments((prev) => [...prev, tempComment]);
+    setCommentText('');
+    const prevCount = comments.length;
+    const newCount = prevCount + 1;
+    onCommentUpdate?.(post.id, newCount);
 
     try {
-      setSendingComment(true);
       const newComment = await api.post<CommentData>(`/comments/${post.id}`, { content: text });
-      setComments((prev) => [...prev, newComment]);
-      setCommentText('');
-      const newCount = post._count.comments + 1;
-      post._count.comments = newCount;
-      onCommentUpdate?.(post.id, newCount);
+      setComments((prev) => prev.map((c) => (c.id === tempComment.id ? newComment : c)));
     } catch {
+      setComments((prev) => prev.filter((c) => c.id !== tempComment.id));
+      onCommentUpdate?.(post.id, prevCount);
       toast.error('Error al enviar comentario');
     } finally {
       setSendingComment(false);
     }
   };
 
-  const handleCommentKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendComment();
-    }
-  };
-
   const handleEditComment = async (commentId: number) => {
     const text = editingCommentText.trim();
     if (!text) return;
+
+    const originalContent = comments.find((c) => c.id === commentId)?.content || '';
+    setEditingPending(commentId);
+    setComments((prev) =>
+      prev.map((c) => (c.id === commentId ? { ...c, content: text } : c)),
+    );
+    setEditingCommentId(null);
+
     try {
       await api.put(`/comments/${commentId}`, { content: text });
-      setComments((prev) =>
-        prev.map((c) =>
-          c.id === commentId ? { ...c, content: text } : c,
-        ),
-      );
-      setEditingCommentId(null);
-      setEditingCommentText('');
     } catch {
+      setComments((prev) =>
+        prev.map((c) => (c.id === commentId ? { ...c, content: originalContent } : c)),
+      );
       toast.error('Error al editar comentario');
+    } finally {
+      setEditingPending(null);
     }
   };
 
@@ -185,15 +231,20 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
 
   const confirmDeleteComment = async () => {
     if (!deleteCommentId) return;
+
+    const deletedComment = comments.find((c) => c.id === deleteCommentId);
+    setComments((prev) => prev.filter((c) => c.id !== deleteCommentId));
+    setShowDeleteModal(false);
+    setDeleteCommentId(null);
+    onCommentUpdate?.(post.id, Math.max(0, comments.length - 1));
+
     try {
       await api.delete(`/comments/${deleteCommentId}`);
-      setComments((prev) => prev.filter((c) => c.id !== deleteCommentId));
-      const newCount = post._count.comments - 1;
-      post._count.comments = newCount;
-      onCommentUpdate?.(post.id, newCount);
-      setShowDeleteModal(false);
-      setDeleteCommentId(null);
     } catch {
+      if (deletedComment) {
+        setComments((prev) => [...prev, deletedComment]);
+      }
+      onCommentUpdate?.(post.id, comments.length);
       toast.error('Error al eliminar comentario');
     }
   };
@@ -210,14 +261,18 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
   };
 
   const confirmDeletePost = async () => {
+    setDeletePostPending(true);
+    setShowDeletePostModal(false);
+    onDelete?.(post.id);
+    onClose();
+
     try {
       await api.delete(`/posts/${post.id}`);
       toast.success('Publicación eliminada');
-      setShowDeletePostModal(false);
-      onDelete?.(post.id);
-      onClose();
     } catch {
       toast.error('Error al eliminar la publicación');
+    } finally {
+      setDeletePostPending(false);
     }
   };
 
@@ -332,43 +387,51 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
           )}
 
           <div className="flex items-center gap-4 px-4 py-3 border-b border-formColorLight/10">
-            <button
+            <OptimisticHeart
+              liked={liked}
+              count={likesCount}
+              pending={likePending}
               onClick={handleLike}
-              className={`flex items-center gap-1.5 transition-all ${
-                liked ? 'text-likeColor' : 'text-primaryBlack/60 hover:text-likeColor'
-              }`}
-            >
-              <Heart className={`w-6 h-6 ${liked ? 'fill-current' : ''} transition-transform hover:scale-110`} />
-              <span className="text-sm font-medium">{likesCount}</span>
-            </button>
+              variant="like"
+            />
             <div className="flex items-center gap-1.5 text-primaryBlack/60">
               <MessageCircle className="w-6 h-6" />
-              <span className="text-sm font-medium">{post._count.comments}</span>
+              <span className="text-sm font-medium">{comments.length}</span>
             </div>
-            <button
+            <OptimisticHeart
+              liked={favorited}
+              count={0}
+              pending={favPending}
               onClick={handleToggleFavorite}
-              className={`ml-auto transition-all ${
-                favorited ? 'text-likeColor' : 'text-primaryBlack/60 hover:text-likeColor'
-              }`}
-            >
-              <Bookmark className={`w-6 h-6 ${favorited ? 'fill-current' : ''} transition-transform hover:scale-110`} />
-            </button>
+              variant="favorite"
+              className="ml-auto"
+            />
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
+          <div className="flex-1 overflow-y-auto min-h-0">
             {commentsLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 text-formColorDark animate-spin" />
-              </div>
+              <SkeletonCommentsList count={5} />
             ) : comments.length === 0 ? (
-              <p className="text-center text-primaryBlack/40 text-sm py-8">
-                No hay comentarios todavía
-              </p>
+              <div className="p-4">
+                <p className="text-center text-primaryBlack/40 text-sm py-8">
+                  No hay comentarios todavía
+                </p>
+              </div>
             ) : (
-              comments.map((comment) => {
+              <div className="p-4 space-y-3">
+              <AnimatePresence>
+              {comments.map((comment) => {
                 const isOwn = comment.pet.id === currentPet?.id;
+                const isSendingTemp = comment.id < 0;
                 return (
-                  <div key={comment.id} className="flex gap-2 group">
+                  <motion.div
+                    key={comment.id}
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.2 }}
+                    className={`flex gap-2 group ${isSendingTemp ? 'opacity-60' : ''}`}
+                  >
                     {comment.pet.image ? (
                       <img
                         src={comment.pet.image}
@@ -406,16 +469,27 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
                           <p className="text-sm text-primaryBlack break-words">
                             <span className="font-semibold">{comment.pet.name}</span>{' '}
                             {comment.content}
+                            {isSendingTemp && (
+                              <motion.span
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: [0, 1, 0] }}
+                                transition={{ duration: 1.5, repeat: Infinity }}
+                                className="ml-2 text-xs text-formColorDark"
+                              >
+                                Enviando...
+                              </motion.span>
+                            )}
                           </p>
                           <div className="flex items-center gap-2 mt-0.5">
                             <p className="text-xs text-primaryBlack/40">
                               {formatDate(comment.createdAt)}
                             </p>
-                            {isOwn && (
+                            {isOwn && !isSendingTemp && (
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
                                   onClick={() => { setEditingCommentId(comment.id); setEditingCommentText(comment.content); }}
-                                  className="text-primaryBlack/30 hover:text-formColorDark cursor-pointer"
+                                  disabled={editingPending === comment.id}
+                                  className="text-primaryBlack/30 hover:text-formColorDark cursor-pointer disabled:opacity-30"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />
                                 </button>
@@ -431,49 +505,34 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
                         </>
                       )}
                     </div>
-                  </div>
+                    {editingPending === comment.id && (
+                      <motion.span
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-xs text-formColorDark animate-pulse"
+                      >
+                        Guardando...
+                      </motion.span>
+                    )}
+                  </motion.div>
                 );
-              })
+              })}
+              </AnimatePresence>
+              <div ref={commentsEndRef} />
+            </div>
             )}
-            <div ref={commentsEndRef} />
           </div>
 
           <div className="border-t border-formColorLight/10 p-3">
             {currentPet ? (
-              <div className="flex items-center gap-2">
-                {currentPet.image ? (
-                  <img
-                    src={currentPet.image}
-                    alt={currentPet.name}
-                    className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-formColorLight to-formColorDark flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                    {currentPet.name[0]}
-                  </div>
-                )}
-                <div className="flex-1 flex items-center gap-2 bg-formColorLight/10 rounded-xl px-3 py-1.5">
-                  <input
-                    type="text"
-                    placeholder="Agrega un comentario..."
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    onKeyDown={handleCommentKey}
-                    className="flex-1 bg-transparent text-sm text-primaryBlack placeholder-primaryBlack/40 outline-none"
-                  />
-                  <button
-                    onClick={handleSendComment}
-                    disabled={!commentText.trim() || sendingComment}
-                    className="text-formColorDark hover:text-redPink transition-colors disabled:text-primaryBlack/20 cursor-pointer"
-                  >
-                    {sendingComment ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Send className="w-5 h-5" />
-                    )}
-                  </button>
-                </div>
-              </div>
+              <CommentInput
+                value={commentText}
+                onChange={setCommentText}
+                onSubmit={handleSendComment}
+                pending={sendingComment}
+                currentPetImage={currentPet.image}
+                currentPetName={currentPet.name}
+              />
             ) : !isAuthenticated ? (
               <p className="text-xs text-primaryBlack/40 text-center py-2">
                 <Link to="/login" className="text-formColorDark hover:underline font-medium" onClick={onClose}>
@@ -511,6 +570,7 @@ export default function PostModal({ post, onClose, onLikeUpdate, onCommentUpdate
         isOpen={showDeletePostModal}
         onClose={() => setShowDeletePostModal(false)}
         onConfirm={confirmDeletePost}
+        isLoading={deletePostPending}
         type="delete"
         title="Eliminar publicación"
         message="¿Estás seguro de que quieres eliminar esta publicación? Esta acción no se puede deshacer."

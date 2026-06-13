@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import Navbar from './Navbar';
 import PostModal from './PostModal';
+import { SkeletonNotificationList } from './Skeletons';
 import type { Notification } from '../types';
 
 export default function Notifications() {
@@ -30,13 +31,7 @@ export default function Notifications() {
       const response = await api.get<{ success: boolean; data: Notification[] }>(
         `/notifications/${currentPet.id}`
       );
-      setNotifications(prev => {
-        const existing = new Map(prev.map(n => [n.id, n]));
-        for (const n of response.data) {
-          existing.set(n.id, n);
-        }
-        return Array.from(existing.values());
-      });
+      setNotifications(response.data);
       window.dispatchEvent(new Event('refresh-unread'));
     } catch (error: any) {
       toast.error('Error al cargar notificaciones');
@@ -46,28 +41,21 @@ export default function Notifications() {
   };
 
   const markAsRead = async (id: string) => {
+    setNotifications(prev => prev.map(n =>
+      n.id === id ? { ...n, isRead: true } : n
+    ));
+    window.dispatchEvent(new Event('refresh-unread'));
     try {
       await api.patch(`/notifications/${id}/read`);
-      setNotifications(prev => prev.map(n =>
-        n.id === id ? { ...n, isRead: true } : n
-      ));
-      window.dispatchEvent(new Event('refresh-unread'));
-    } catch (error: any) {
-      toast.error('Error al marcar como leída');
-    }
-  };
-
-  const markAsReadAndRefresh = async (id: string) => {
-    await markAsRead(id);
-    fetchNotifications();
+    } catch {}
   };
 
   const handleMouseEnter = (notification: Notification) => {
     if (notification.isRead) return;
     hoverTimerRef.current = setTimeout(() => {
-      markAsReadAndRefresh(notification.id);
+      markAsRead(notification.id);
       hoverTimerRef.current = null;
-    }, 3000);
+    }, 2000);
   };
 
   const handleMouseLeave = () => {
@@ -81,30 +69,25 @@ export default function Notifications() {
 
   const markAllAsRead = async () => {
     setIsMarkingAll(true);
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    window.dispatchEvent(new Event('refresh-unread'));
     try {
       await api.patch(`/notifications/${currentPet!.id}/read-all`);
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-      window.dispatchEvent(new Event('refresh-unread'));
       toast.success('Todas las notificaciones marcadas como leídas');
     } catch {
       const unread = notifications.filter(n => !n.isRead);
-      let successCount = 0;
       for (const n of unread) {
         try {
           await api.patch(`/notifications/${n.id}/read`);
-          setNotifications(prev => prev.map(p =>
-            p.id === n.id ? { ...p, isRead: true } : p
-          ));
-          successCount++;
         } catch {}
       }
-      window.dispatchEvent(new Event('refresh-unread'));
-      if (successCount > 0) {
-        toast.success(`${successCount} notificaciones marcadas como leídas`);
+      const stillUnread = notifications.filter(n => !n.isRead).length;
+      const marked = unread.length - stillUnread;
+      if (marked > 0) {
+        toast.success(`${marked} notificaciones marcadas como leídas`);
       }
     } finally {
       setIsMarkingAll(false);
-      fetchNotifications();
     }
   };
 
@@ -198,9 +181,7 @@ export default function Notifications() {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-12 h-12 border-4 border-formColorLight/30 border-t-redPink rounded-full animate-spin" />
-          </div>
+          <SkeletonNotificationList count={5} />
         ) : notifications.length === 0 ? (
           <div className="bg-primaryWhite rounded-2xl shadow-lg p-8 text-center border border-formColorLight/20">
             <div className="w-16 h-16 bg-gradient-to-br from-formColorLight/20 to-formColorDark/20 rounded-full flex items-center justify-center mx-auto mb-4">

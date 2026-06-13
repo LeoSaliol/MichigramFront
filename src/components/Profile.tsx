@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Settings, Loader2, Grid, UserPlus, UserMinus, MessageCircle, Trash2 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import Navbar from './Navbar';
 import PostModal from './PostModal';
 import ConfirmModal from './ConfirmModal';
+import { SkeletonProfileHeader, SkeletonPostGrid } from './Skeletons';
+import { PendingButton } from './ui/PendingButton';
 import type { Pet, Post } from '../types';
 
 export default function Profile() {
@@ -28,6 +31,7 @@ export default function Profile() {
     } | null>(null);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [followPending, setFollowPending] = useState(false);
     const navigate = useNavigate();
     const { currentPet, user, pets, setCurrentPet, fetchMyPets, isAuthenticated } = useAuthStore();
 
@@ -69,22 +73,36 @@ export default function Profile() {
             return;
         }
 
+        if (followPending) return;
+
+        const wasFollowing = isFollowing;
+        const prevCount = pet.followersCount || 0;
+
+        setIsFollowing(!isFollowing);
+        setFollowPending(true);
+        setPet({
+            ...pet,
+            followersCount: wasFollowing
+                ? prevCount - 1
+                : prevCount + 1,
+        });
+
         try {
             await api.post(`/follow/${pet.id}`);
-            setIsFollowing(!isFollowing);
-            setPet({
-                ...pet,
-                followersCount: isFollowing
-                    ? (pet.followersCount || 1) - 1
-                    : (pet.followersCount || 0) + 1,
-            });
             toast.success(
-                isFollowing
+                wasFollowing
                     ? 'Dejaste de seguir'
                     : 'Ahora sigues a esta mascota',
             );
         } catch (error: any) {
+            setIsFollowing(wasFollowing);
+            setPet({
+                ...pet,
+                followersCount: prevCount,
+            });
             toast.error('Error al seguir/dejar de seguir');
+        } finally {
+            setFollowPending(false);
         }
     };
 
@@ -178,8 +196,11 @@ export default function Profile() {
         return (
             <div className="min-h-screen bg-bgWhite">
                 <Navbar />
-                <div className="flex items-center justify-center py-20">
-                    <div className="w-12 h-12 border-4 border-formColorLight/30 border-t-redPink rounded-full animate-spin" />
+                <div className="max-w-5xl mx-auto px-4 py-8">
+                    <SkeletonProfileHeader />
+                    <div className="mt-8">
+                        <SkeletonPostGrid count={9} />
+                    </div>
                 </div>
             </div>
         );
@@ -251,28 +272,16 @@ export default function Profile() {
                                             </>
                                         ) : currentPet ? (
                                             <>
-                                                <button
+                                                <PendingButton
                                                     onClick={handleFollow}
-                                                    className={`flex cursor-pointer items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all text-primaryWhite hover:opacity-90 shadow-md shadow-formColorDark/30 ${
-                                                        isFollowing
-                                                            ? ' bg-redPink  '
-                                                            : 'bg-formColorDark    '
-                                                    }`}
+                                                    pending={followPending}
+                                                    variant={isFollowing ? 'danger' : 'primary'}
+                                                    size="md"
+                                                    leftIcon={isFollowing ? <UserMinus className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                                                    className="shadow-md shadow-formColorDark/30"
                                                 >
-                                                    {isFollowing ? (
-                                                        <>
-                                                            <UserMinus className="w-4 h-4  " />
-                                                            Dejar de seguir
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <UserPlus className="w-4 h-4 " />
-                                                            <span className="">
-                                                                Seguir
-                                                            </span>
-                                                        </>
-                                                    )}
-                                                </button>
+                                                    {isFollowing ? 'Dejar de seguir' : 'Seguir'}
+                                                </PendingButton>
                                                 <button
                                                     onClick={handleMessage}
                                                     className="flex items-center gap-2 px-4 py-2 border border-formColorLight/30 rounded-lg hover:bg-formColorLight/20 cursor-pointer transition-colors text-primaryBlack"
@@ -344,10 +353,15 @@ export default function Profile() {
                                 )}
                             </div>
                         ) : (
-                            <div className="grid grid-cols-3 gap-1 p-1">
+                            <motion.div layout className="grid grid-cols-3 gap-1 p-1">
                                 {posts.map((post) => (
-                                    <div
+                                    <motion.div
                                         key={post.id}
+                                        layout
+                                        initial={{ opacity: 0, scale: 0.9 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.9 }}
+                                        transition={{ duration: 0.2 }}
                                         onClick={() => handlePostClick(post)}
                                         className="aspect-square cursor-pointer hover:opacity-80 transition-opacity"
                                     >
@@ -356,9 +370,9 @@ export default function Profile() {
                                             alt="Post"
                                             className="w-full h-full object-cover rounded-sm"
                                         />
-                                    </div>
+                                    </motion.div>
                                 ))}
-                            </div>
+                            </motion.div>
                         )}
                     </div>
                 </div>

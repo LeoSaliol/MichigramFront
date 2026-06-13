@@ -29,6 +29,7 @@
 }
 
 body {
+  margin: 0;
   font-family: 'Bricolage Grotesque', system-ui, sans-serif;
   background-color: var(--color-bgWhite);
   color: var(--color-primaryBlack);
